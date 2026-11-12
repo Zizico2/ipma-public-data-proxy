@@ -1,0 +1,27 @@
+[package]
+name = "ipma-public-data-proxy"
+description = "gRPC server for IPMA website public-data feeds"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+ipma-public-data-proto.workspace = true
+ipma-public-data-service.workspace = true
+anyhow.workspace = true
+clap.workspace = true
+dotenvy.workspace = true
+reqwest.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal"] }
+tonic = { workspace = true, features = ["gzip"] }
+tonic-health.workspace = true
+tonic-reflection.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[dev-dependencies]
+prost.workspace = true
+
+[lints]
+workspace = true

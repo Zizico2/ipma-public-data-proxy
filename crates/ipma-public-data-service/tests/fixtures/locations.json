@@ -1,0 +1,22 @@
+[
+  {
+    "idRegiao": 1,
+    "idAreaAviso": "AVR",
+    "globalIdLocal": 1010100,
+    "idConcelho": 1,
+    "latitude": "40.5800",
+    "idDistrito": 1,
+    "local": "Águeda",
+    "longitude": "-8.4400"
+  },
+  {
+    "idRegiao": 1,
+    "idAreaAviso": "AVR",
+    "globalIdLocal": 1010200,
+    "idConcelho": 2,
+    "latitude": "40.6909",
+    "idDistrito": 1,
+    "local": "Albergaria-a-Velha",
+    "longitude": "-8.4784"
+  }
+]

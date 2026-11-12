@@ -1,0 +1,12 @@
+[
+  {
+    "idRegiao": 1,
+    "idDistrito": 1,
+    "nome": "Aveiro"
+  },
+  {
+    "idRegiao": 1,
+    "idDistrito": 2,
+    "nome": "Beja"
+  }
+]

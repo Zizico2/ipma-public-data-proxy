@@ -1,0 +1,25 @@
+{
+  "owner": "IPMA",
+  "country": "PT",
+  "data": [
+    {
+      "reportDate": "2026-11-12T12:32:25",
+      "text": "Ondas de oeste/sudoeste até 4 metros de altura significativa.",
+      "awarenessTypeName": "Agitação Marítima",
+      "idAreaAviso": "BJA",
+      "startTime": "2026-11-12T12:33:00",
+      "awarenessLevelID": "yellow",
+      "endTime": "2026-11-13T03:00:00"
+    },
+    {
+      "reportDate": "2026-11-12T12:32:25",
+      "text": "Ondas de oeste/sudoeste até 4 metros de altura significativa.",
+      "awarenessTypeName": "Agitação Marítima",
+      "idAreaAviso": "FAR",
+      "startTime": "2026-11-12T12:33:00",
+      "awarenessLevelID": "yellow",
+      "endTime": "2026-11-13T03:00:00"
+    }
+  ],
+  "dataAtualiza": "2026-11-12T16:32:02.102020"
+}

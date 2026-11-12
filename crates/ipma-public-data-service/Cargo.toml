@@ -1,0 +1,30 @@
+[package]
+name = "ipma-public-data-service"
+description = "Transparent IPMA upstream access, data conversion and gRPC service"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+ipma-public-data-proto.workspace = true
+anyhow.workspace = true
+bytes.workspace = true
+chrono.workspace = true
+prost.workspace = true
+prost-types.workspace = true
+reqwest.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["rt", "sync"] }
+tonic.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+axum.workspace = true
+flate2.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net", "time"] }
+tokio-stream.workspace = true
+
+[lints]
+workspace = true
