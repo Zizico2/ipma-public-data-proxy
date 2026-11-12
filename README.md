@@ -74,3 +74,13 @@ row update, not a promise that every forecast row has the same update time.
 Feed discovery: [IPMA website JavaScript](https://www.ipma.pt/opencms/bin/scripts/otempo/prev.localidade.hora.js).
 Fixtures and behavior were verified on 2026-11-12. Reuse remains subject to IPMA
 terms and attribution. This project is not affiliated with IPMA.
+
+## Generated upstream client
+
+HTTP operations use the corresponding `ipma-openapi` generated `raw::Client`,
+pinned to an exact Git revision in Cargo.toml and Cargo.lock. The proxy injects
+its existing TLS-verified reqwest transport, timeout and no-redirect/no-retry
+policy. Streaming responses pass through the decompressed body cap before the
+existing bounded blocking conversion into protobuf. No typed JSON decode/re-encode
+occurs, so source nulls, unknown fields, numeric spellings and Geobuf properties
+retain their existing semantics. The gateway and gRPC contract are unchanged.

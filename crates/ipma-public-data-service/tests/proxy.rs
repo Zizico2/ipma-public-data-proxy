@@ -345,3 +345,60 @@ fn validates_base_url_and_resource_limits() {
         .is_err()
     );
 }
+
+#[tokio::test]
+async fn chunked_and_gzipped_bodies_cannot_bypass_the_decompressed_size_limit() {
+    use axum::{body::Body, http::Response};
+    use ipma_public_data_proto::v1::public_data_service_server::PublicDataService;
+    use std::io::Write;
+    for compressed in [false, true] {
+        let input = vec![b' '; 10_000];
+        let body = if compressed {
+            let mut encoder =
+                flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+            encoder.write_all(&input).unwrap();
+            let encoded = encoder.finish().unwrap();
+            assert!(encoded.len() < 128);
+            encoded
+        } else {
+            input
+        };
+        let app = Router::new().route(
+            "/public-data/warnings/warnings_www.json",
+            get(move || {
+                let body = body.clone();
+                async move {
+                    let chunks = body
+                        .chunks(8)
+                        .map(|v| {
+                            Ok::<_, std::convert::Infallible>(bytes::Bytes::copy_from_slice(v))
+                        })
+                        .collect::<Vec<_>>();
+                    let mut response = Response::builder();
+                    if compressed {
+                        response = response.header("content-encoding", "gzip");
+                    }
+                    response
+                        .body(Body::from_stream(tokio_stream::iter(chunks)))
+                        .unwrap()
+                }
+            }),
+        );
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let task = tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        let proxy = Proxy::new(ProxyOptions {
+            upstream_base_url: format!("http://{address}/public-data/").parse().unwrap(),
+            max_body_bytes: 128,
+            ..Default::default()
+        })
+        .unwrap();
+        let result = proxy
+            .get_warnings(tonic::Request::new(GetWarningsRequest {}))
+            .await;
+        task.abort();
+        assert_eq!(result.unwrap_err().code(), Code::ResourceExhausted);
+    }
+}

@@ -4,11 +4,13 @@ use std::{
 };
 
 use bytes::BytesMut;
+use futures_util::StreamExt;
+use ipma_public_data_client::raw::Client as ApiClient;
 use ipma_public_data_proto::{
     MAX_MESSAGE_BYTES,
     v1::{self as pb, public_data_service_server::PublicDataService},
 };
-use reqwest::{Client, Url};
+use reqwest::{Client as HttpClient, Url};
 use tokio::sync::Semaphore;
 use tonic::{Request, Response, Status};
 
@@ -49,6 +51,21 @@ pub(crate) enum Error {
     Worker(#[from] tokio::task::JoinError),
 }
 
+impl From<ipma_public_data_client::Error<()>> for Error {
+    fn from(error: ipma_public_data_client::Error<()>) -> Self {
+        use ipma_public_data_client::Error as ClientError;
+        match error {
+            ClientError::CommunicationError(error) | ClientError::ResponseBodyError(error) => {
+                Self::Http(error)
+            }
+            error => match error.status() {
+                Some(status) => Self::HttpStatus(status.as_u16()),
+                None => Self::Invalid(error.to_string()),
+            },
+        }
+    }
+}
+
 impl Error {
     fn status(&self) -> Status {
         match self {
@@ -86,7 +103,7 @@ impl Key {
 /// Clones share the HTTP connection pool and fetch permits. Each data RPC fetches IPMA.
 #[derive(Clone)]
 pub struct Proxy {
-    client: Client,
+    client: ApiClient,
     options: ProxyOptions,
     permits: Arc<Semaphore>,
 }
@@ -120,7 +137,7 @@ impl Proxy {
                 && options.upstream_timeout <= Duration::from_secs(300),
             "fetch concurrency must not exceed 256 and timeout must not exceed 300 seconds"
         );
-        let client = Client::builder()
+        let client = HttpClient::builder()
             .user_agent(concat!(
                 env!("CARGO_PKG_NAME"),
                 "/",
@@ -134,6 +151,10 @@ impl Proxy {
             .tcp_nodelay(true)
             .gzip(true)
             .build()?;
+        let client = ApiClient::new_with_client(
+            options.upstream_base_url.as_str().trim_end_matches('/'),
+            client,
+        );
         let permits = Arc::new(Semaphore::new(options.max_concurrent_fetches));
         Ok(Self {
             client,
@@ -149,6 +170,28 @@ impl Proxy {
         })
     }
 
+    async fn request(
+        &self,
+        key: Key,
+    ) -> Result<ipma_public_data_client::ResponseValue<ipma_public_data_client::ByteStream>, Error>
+    {
+        let response = match key {
+            Key::Forecast(id) => {
+                self.client
+                    .get_forecast(
+                        u64::from(id)
+                            .try_into()
+                            .map_err(|_| Error::Invalid("invalid location ID".into()))?,
+                    )
+                    .await
+            }
+            Key::Locations => self.client.get_locations().await,
+            Key::Districts => self.client.get_districts().await,
+            Key::Warnings => self.client.get_warnings().await,
+        };
+        response.map_err(Into::into)
+    }
+
     async fn fetch(&self, key: Key) -> Result<Payload, Error> {
         let permit = self
             .permits
@@ -161,18 +204,20 @@ impl Proxy {
             .join(&key.path())
             .map_err(|e| Error::Invalid(e.to_string()))?;
         let started = Instant::now();
-        let mut response = self.client.get(url.clone()).send().await?;
-        if !response.status().is_success() {
-            return Err(Error::HttpStatus(response.status().as_u16()));
-        }
+        let response = self.request(key).await?;
         let limit = self.options.max_body_bytes;
-        if response.content_length().is_some_and(|n| n > limit as u64) {
+        let length = response
+            .headers()
+            .get(reqwest::header::CONTENT_LENGTH)
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.parse::<u64>().ok());
+        if length.is_some_and(|n| n > limit as u64) {
             return Err(Error::TooLarge);
         }
-        let mut body = BytesMut::with_capacity(
-            response.content_length().unwrap_or(8192).min(limit as u64) as usize,
-        );
-        while let Some(chunk) = response.chunk().await? {
+        let mut body = BytesMut::with_capacity(length.unwrap_or(8192).min(limit as u64) as usize);
+        let mut stream = response.into_inner_stream();
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk?;
             if chunk.len() > limit - body.len() {
                 return Err(Error::TooLarge);
             }

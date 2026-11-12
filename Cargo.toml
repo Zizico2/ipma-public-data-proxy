@@ -9,6 +9,8 @@ edition = "2024"
 rust-version = "1.99"
 
 [workspace.dependencies]
+ipma-public-data-client = { git = "https://github.com/Zizico2/ipma-openapi.git", rev = "99d4e9a8a3aa5e74b2cd6d13eaa4912255fcfe56" }
+futures-util = "0.3"
 ipma-public-data-proto = { git = "https://github.com/Zizico2/ipma-public-data-proto.git", rev = "cabad92076b69be09eedb164c3776035f5463934" }
 ipma-public-data-service = { path = "crates/ipma-public-data-service", version = "0.1.0" }
 

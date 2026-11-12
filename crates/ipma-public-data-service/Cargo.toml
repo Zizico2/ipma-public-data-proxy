@@ -7,6 +7,8 @@ rust-version.workspace = true
 publish = false
 
 [dependencies]
+ipma-public-data-client.workspace = true
+futures-util.workspace = true
 ipma-public-data-proto.workspace = true
 anyhow.workspace = true
 bytes.workspace = true
