@@ -24,9 +24,6 @@ type Result<T, E = Error> = std::result::Result<T, E>;
 fn invalid(field: &str) -> Error {
     Error::Invalid(format!("invalid or missing {field}"))
 }
-fn parse<'a, T: serde::Deserialize<'a>>(body: &'a [u8]) -> Result<T> {
-    serde_json::from_slice(body).map_err(|e| Error::Invalid(e.to_string()))
-}
 trait SourceNumber {
     fn source_number(&self) -> Result<Option<f64>>;
 }
@@ -128,24 +125,27 @@ fn latest(metadata: &mut pb::SourceMetadata, t: Option<prost_types::Timestamp>) 
         metadata.upstream_updated_at = Some(t)
     }
 }
-#[derive(serde::Deserialize)]
-struct RawEnvelope<'a> {
-    #[serde(borrow)]
-    data: Vec<&'a serde_json::value::RawValue>,
-}
-
-pub(crate) fn decode(
+pub(crate) async fn fetch(
+    client: &ipma_public_data_client::Client,
     key: Key,
-    body: &[u8],
     mut metadata: pb::SourceMetadata,
 ) -> Result<Payload, Error> {
     match key {
         Key::Forecast(requested) => {
-            let rows: Vec<&serde_json::value::RawValue> = parse(body)?;
+            let rows = client
+                .get_forecast(
+                    u64::from(requested)
+                        .try_into()
+                        .map_err(|_| invalid("identifier"))?,
+                )
+                .await?
+                .into_inner();
+            metadata.fetched_at = Some(std::time::SystemTime::now().into());
             let forecasts = rows
                 .into_iter()
-                .map(|raw| {
-                    let v: up::Forecast = parse(raw.get().as_bytes())?;
+                .map(|v| {
+                    let source_json =
+                        serde_json::to_string(&v).map_err(|e| Error::Invalid(e.to_string()))?;
                     let location_id = id(v.global_id_local)?;
                     if location_id != requested {
                         return Err(invalid("forecast location mismatch"));
@@ -175,7 +175,7 @@ pub(crate) fn decode(
                         peak_period_seconds: number(&v.periodo_pico)?,
                         wave_direction: text(&v.dir_ondulacao),
                         wind_speed_class: integer(&v.id_ffx_vento)?,
-                        source_json: raw.get().to_owned(),
+                        source_json,
                     })
                 })
                 .collect::<Result<_, Error>>()?;
@@ -185,11 +185,13 @@ pub(crate) fn decode(
             }))
         }
         Key::Locations => {
-            let rows: Vec<&serde_json::value::RawValue> = parse(body)?;
+            let rows = client.get_locations().await?.into_inner();
+            metadata.fetched_at = Some(std::time::SystemTime::now().into());
             let locations = rows
                 .into_iter()
-                .map(|raw| {
-                    let v: up::Location = parse(raw.get().as_bytes())?;
+                .map(|v| {
+                    let source_json =
+                        serde_json::to_string(&v).map_err(|e| Error::Invalid(e.to_string()))?;
                     Ok(pb::Location {
                         location_id: id(v.global_id_local)?,
                         name: required_text(&v.local)?,
@@ -199,7 +201,7 @@ pub(crate) fn decode(
                         district_id: optional_id(&v.id_distrito)?,
                         municipality_local_id: optional_id(&v.id_concelho)?,
                         warning_area_id: text(&v.id_area_aviso),
-                        source_json: raw.get().to_owned(),
+                        source_json,
                     })
                 })
                 .collect::<Result<_, Error>>()?;
@@ -209,16 +211,18 @@ pub(crate) fn decode(
             }))
         }
         Key::Districts => {
-            let rows: Vec<&serde_json::value::RawValue> = parse(body)?;
+            let rows = client.get_districts().await?.into_inner();
+            metadata.fetched_at = Some(std::time::SystemTime::now().into());
             let districts = rows
                 .into_iter()
-                .map(|raw| {
-                    let v: up::District = parse(raw.get().as_bytes())?;
+                .map(|v| {
+                    let source_json =
+                        serde_json::to_string(&v).map_err(|e| Error::Invalid(e.to_string()))?;
                     Ok(pb::District {
                         district_id: id(v.id_distrito)?,
                         region_id: optional_id(&v.id_regiao)?,
                         name: required_text(&v.nome)?,
-                        source_json: raw.get().to_owned(),
+                        source_json,
                     })
                 })
                 .collect::<Result<_, Error>>()?;
@@ -228,14 +232,15 @@ pub(crate) fn decode(
             }))
         }
         Key::Warnings => {
-            let root: up::WarningsResponse = parse(body)?;
+            let root = client.get_warnings().await?.into_inner();
+            metadata.fetched_at = Some(std::time::SystemTime::now().into());
             latest(&mut metadata, timestamp(root.data_atualiza.as_deref())?);
-            let source: RawEnvelope<'_> = parse(body)?;
             let warnings = root
                 .data
                 .into_iter()
-                .zip(source.data)
-                .map(|(v, raw)| {
+                .map(|v| {
+                    let source_json =
+                        serde_json::to_string(&v).map_err(|e| Error::Invalid(e.to_string()))?;
                     Ok(pb::Warning {
                         area_id: required_text(&v.id_area_aviso)?,
                         type_name: required_text(&v.awareness_type_name)?,
@@ -244,7 +249,7 @@ pub(crate) fn decode(
                         starts_at: required_timestamp(Some(&v.start_time))?,
                         ends_at: required_timestamp(Some(&v.end_time))?,
                         reported_at: timestamp(v.report_date.as_deref())?,
-                        source_json: raw.get().to_owned(),
+                        source_json,
                     })
                 })
                 .collect::<Result<_, Error>>()?;

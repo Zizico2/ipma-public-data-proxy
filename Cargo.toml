@@ -9,9 +9,7 @@ edition = "2024"
 rust-version = "1.99"
 
 [workspace.dependencies]
-serde = { version = "1", features = ["derive"] }
-ipma-public-data-client = { git = "https://github.com/Zizico2/ipma-openapi.git", rev = "781c45b14b7e36c0fb9239be338c9222e761d537" }
-futures-util = "0.3"
+ipma-public-data-client = { git = "https://github.com/Zizico2/ipma-openapi.git", rev = "3f0239c3a7b354a56b1f0b3c4d2b1a8b0321085a" }
 ipma-public-data-proto = { git = "https://github.com/Zizico2/ipma-public-data-proto.git", rev = "cabad92076b69be09eedb164c3776035f5463934" }
 ipma-public-data-service = { path = "crates/ipma-public-data-service", version = "0.1.0" }
 
@@ -25,7 +23,7 @@ flate2 = "1"
 prost = "0.14.4"
 prost-types = "0.14.4"
 reqwest = { version = "0.13.5", default-features = false, features = ["rustls", "gzip", "http2"] }
-serde_json = { version = "1.0.154", features = ["raw_value"] }
+serde_json = "1.0.154"
 thiserror = "2.0.21"
 tokio = "1.54.1"
 tokio-stream = { version = "0.1", features = ["net"] }

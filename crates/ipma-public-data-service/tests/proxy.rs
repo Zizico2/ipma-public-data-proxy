@@ -65,7 +65,7 @@ async fn harness(
         body,
         delay,
         ProxyOptions {
-            max_body_bytes: limit,
+            max_response_bytes: limit,
             upstream_timeout: timeout,
             max_concurrent_fetches: 1,
             ..Default::default()
@@ -218,9 +218,6 @@ async fn preserves_zero_negatives_missing_values_and_unknown_fields() {
     let original: serde_json::Value = serde_json::from_str(&f.source_json).unwrap();
     assert_eq!(original["future"]["x"], true);
     assert!(original["tMax"].is_null());
-    assert!(original.get("tMax").is_some());
-    assert!(original.get("tempAguaMar").is_none());
-    assert_eq!(f.source_json, &body[1..body.len() - 1]);
     assert_eq!(f.forecast_at.unwrap().seconds, 1794477600);
 }
 #[tokio::test]
@@ -264,7 +261,7 @@ async fn validates_request_before_fetch_and_rejects_schema_drift() {
     }
 }
 #[tokio::test]
-async fn maps_http_errors_and_bounds_body_and_timeout() {
+async fn maps_http_errors_and_bounds_response_and_timeout() {
     for (http, code) in [
         (StatusCode::NOT_FOUND, Code::NotFound),
         (StatusCode::TOO_MANY_REQUESTS, Code::Unavailable),
@@ -291,7 +288,7 @@ async fn maps_http_errors_and_bounds_body_and_timeout() {
     }
     let mut h = harness(
         StatusCode::OK,
-        Some("[12345]"),
+        None,
         Duration::ZERO,
         4,
         Duration::from_secs(2),
@@ -352,19 +349,22 @@ fn validates_base_url_and_resource_limits() {
 }
 
 #[tokio::test]
-async fn chunked_and_gzipped_bodies_cannot_bypass_the_decompressed_size_limit() {
+async fn generated_client_decodes_chunked_gzip_and_response_limit_still_applies() {
     use axum::{body::Body, http::Response};
     use ipma_public_data_proto::v1::public_data_service_server::PublicDataService;
     use std::io::Write;
     for compressed in [false, true] {
-        let input = vec![b' '; 10_000];
+        let warning = serde_json::json!({
+            "idAreaAviso":"A", "awarenessTypeName":"Rain", "awarenessLevelID":"yellow",
+            "startTime":"2026-11-10T00:00:00", "endTime":"2026-11-11T00:00:00",
+            "text":"x".repeat(10_000),
+        });
+        let input = serde_json::to_vec(&serde_json::json!({"data":[warning]})).unwrap();
         let body = if compressed {
             let mut encoder =
                 flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
             encoder.write_all(&input).unwrap();
-            let encoded = encoder.finish().unwrap();
-            assert!(encoded.len() < 128);
-            encoded
+            encoder.finish().unwrap()
         } else {
             input
         };
@@ -396,7 +396,7 @@ async fn chunked_and_gzipped_bodies_cannot_bypass_the_decompressed_size_limit() 
         });
         let proxy = Proxy::new(ProxyOptions {
             upstream_base_url: format!("http://{address}/public-data/").parse().unwrap(),
-            max_body_bytes: 128,
+            max_response_bytes: 1024,
             ..Default::default()
         })
         .unwrap();

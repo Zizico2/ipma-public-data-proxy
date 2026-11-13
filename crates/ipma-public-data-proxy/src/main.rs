@@ -35,9 +35,9 @@ struct Config {
     /// Maximum simultaneous HTTP fetches and CPU conversions.
     #[arg(long, env = "IPMA_PUBLIC_DATA_PROXY_MAX_CONCURRENT_FETCHES", default_value = "8", value_parser = clap::value_parser!(u32).range(1..=256))]
     max_concurrent_fetches: u32,
-    /// Maximum decompressed HTTP body size in MiB (1..32).
-    #[arg(long, env = "IPMA_PUBLIC_DATA_PROXY_MAX_BODY_MIB", default_value = "32", value_parser = clap::value_parser!(u32).range(1..=32))]
-    max_body_mib: u32,
+    /// Maximum protobuf response size in MiB (1..32).
+    #[arg(long, env = "IPMA_PUBLIC_DATA_PROXY_MAX_RESPONSE_MIB", default_value = "32", value_parser = clap::value_parser!(u32).range(1..=32))]
+    max_response_mib: u32,
     /// Tracing filter directives.
     #[arg(
         long,
@@ -88,7 +88,7 @@ async fn main() -> anyhow::Result<()> {
         upstream_base_url: config.upstream_base_url,
         upstream_timeout: Duration::from_secs(config.upstream_timeout_seconds),
         max_concurrent_fetches: config.max_concurrent_fetches as usize,
-        max_body_bytes: config.max_body_mib as usize * 1024 * 1024,
+        max_response_bytes: config.max_response_mib as usize * 1024 * 1024,
     })?;
     let service = PublicDataServiceServer::new(proxy)
         .max_decoding_message_size(64 * 1024)

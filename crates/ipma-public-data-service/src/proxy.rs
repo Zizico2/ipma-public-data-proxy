@@ -3,9 +3,7 @@ use std::{
     time::{Duration, Instant, SystemTime},
 };
 
-use bytes::BytesMut;
-use futures_util::StreamExt;
-use ipma_public_data_client::raw::Client as ApiClient;
+use ipma_public_data_client::Client as ApiClient;
 use ipma_public_data_proto::{
     MAX_MESSAGE_BYTES,
     v1::{self as pb, public_data_service_server::PublicDataService},
@@ -20,7 +18,7 @@ use crate::convert::{self, Payload};
 pub struct ProxyOptions {
     pub upstream_base_url: Url,
     pub upstream_timeout: Duration,
-    pub max_body_bytes: usize,
+    pub max_response_bytes: usize,
     pub max_concurrent_fetches: usize,
 }
 
@@ -29,7 +27,7 @@ impl Default for ProxyOptions {
         Self {
             upstream_base_url: Url::parse("https://api.ipma.pt/public-data/").expect("static URL"),
             upstream_timeout: Duration::from_secs(15),
-            max_body_bytes: MAX_MESSAGE_BYTES,
+            max_response_bytes: MAX_MESSAGE_BYTES,
             max_concurrent_fetches: 8,
         }
     }
@@ -41,23 +39,24 @@ pub(crate) enum Error {
     Http(#[from] reqwest::Error),
     #[error("upstream returned HTTP {0}")]
     HttpStatus(u16),
-    #[error("upstream body or converted response exceeds size limit")]
+    #[error("response exceeds size limit")]
     TooLarge,
     #[error("proxy fetch capacity exhausted")]
     Busy,
     #[error("invalid upstream data: {0}")]
     Invalid(String),
-    #[error("conversion worker failed: {0}")]
-    Worker(#[from] tokio::task::JoinError),
 }
 
 impl From<ipma_public_data_client::Error<()>> for Error {
     fn from(error: ipma_public_data_client::Error<()>) -> Self {
         use ipma_public_data_client::Error as ClientError;
         match error {
-            ClientError::CommunicationError(error) | ClientError::ResponseBodyError(error) => {
-                Self::Http(error)
+            ClientError::CommunicationError(error) => Self::Http(error),
+            ClientError::InvalidResponsePayload(_, error) => Self::Invalid(error.to_string()),
+            ClientError::ResponseBodyError(error) if error.is_decode() => {
+                Self::Invalid(error.to_string())
             }
+            ClientError::ResponseBodyError(error) => Self::Http(error),
             error => match error.status() {
                 Some(status) => Self::HttpStatus(status.as_u16()),
                 None => Self::Invalid(error.to_string()),
@@ -77,7 +76,6 @@ impl Error {
             Self::HttpStatus(_) => Status::unavailable("IPMA rejected the upstream request"),
             Self::Busy | Self::TooLarge => Status::resource_exhausted(self.to_string()),
             Self::Invalid(_) => Status::data_loss("IPMA returned invalid or unsupported data"),
-            Self::Worker(_) => Status::internal("dataset conversion failed"),
         }
     }
 }
@@ -125,8 +123,8 @@ impl Proxy {
             "upstream base must be an absolute directory URL without credentials, query or fragment"
         );
         anyhow::ensure!(
-            options.max_body_bytes > 0 && options.max_body_bytes <= MAX_MESSAGE_BYTES,
-            "body limit must be in 1..={MAX_MESSAGE_BYTES}"
+            options.max_response_bytes > 0 && options.max_response_bytes <= MAX_MESSAGE_BYTES,
+            "response limit must be in 1..={MAX_MESSAGE_BYTES}"
         );
         anyhow::ensure!(
             options.max_concurrent_fetches > 0 && !options.upstream_timeout.is_zero(),
@@ -170,30 +168,8 @@ impl Proxy {
         })
     }
 
-    async fn request(
-        &self,
-        key: Key,
-    ) -> Result<ipma_public_data_client::ResponseValue<ipma_public_data_client::ByteStream>, Error>
-    {
-        let response = match key {
-            Key::Forecast(id) => {
-                self.client
-                    .get_forecast(
-                        u64::from(id)
-                            .try_into()
-                            .map_err(|_| Error::Invalid("invalid location ID".into()))?,
-                    )
-                    .await
-            }
-            Key::Locations => self.client.get_locations().await,
-            Key::Districts => self.client.get_districts().await,
-            Key::Warnings => self.client.get_warnings().await,
-        };
-        response.map_err(Into::into)
-    }
-
     async fn fetch(&self, key: Key) -> Result<Payload, Error> {
-        let permit = self
+        let _permit = self
             .permits
             .clone()
             .try_acquire_owned()
@@ -204,25 +180,6 @@ impl Proxy {
             .join(&key.path())
             .map_err(|e| Error::Invalid(e.to_string()))?;
         let started = Instant::now();
-        let response = self.request(key).await?;
-        let limit = self.options.max_body_bytes;
-        let length = response
-            .headers()
-            .get(reqwest::header::CONTENT_LENGTH)
-            .and_then(|v| v.to_str().ok())
-            .and_then(|v| v.parse::<u64>().ok());
-        if length.is_some_and(|n| n > limit as u64) {
-            return Err(Error::TooLarge);
-        }
-        let mut body = BytesMut::with_capacity(length.unwrap_or(8192).min(limit as u64) as usize);
-        let mut stream = response.into_inner_stream();
-        while let Some(chunk) = stream.next().await {
-            let chunk = chunk?;
-            if chunk.len() > limit - body.len() {
-                return Err(Error::TooLarge);
-            }
-            body.extend_from_slice(&chunk);
-        }
         let fetched = SystemTime::now();
         let metadata = pb::SourceMetadata {
             source_url: url.into(),
@@ -231,17 +188,10 @@ impl Proxy {
             upstream_updated_at: None,
             attribution: "IPMA, I.P. — https://www.ipma.pt".into(),
         };
-        let body = body.freeze();
-        let payload = tokio::task::spawn_blocking(move || {
-            // Hold the permit during CPU work, even if the requesting RPC is cancelled.
-            let _permit = permit;
-            let payload = convert::decode(key, &body, metadata)?;
-            if payload.encoded_len() > MAX_MESSAGE_BYTES {
-                return Err(Error::TooLarge);
-            }
-            Ok(payload)
-        })
-        .await??;
+        let payload = convert::fetch(&self.client, key, metadata).await?;
+        if payload.encoded_len() > self.options.max_response_bytes {
+            return Err(Error::TooLarge);
+        }
         tracing::info!(path = %key.path(), elapsed_ms = started.elapsed().as_millis(), response_bytes = payload.encoded_len(), "dataset fetched");
         Ok(payload)
     }

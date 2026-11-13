@@ -54,9 +54,9 @@ the website's three-hour definition. See the proto README for field semantics.
 The shared reqwest client validates TLS and negotiates gzip. HTTP is permitted
 only for loopback tests. The configured base must be a directory URL without
 credentials, query or fragment. Clients select fixed routes, never arbitrary URLs.
-Decompressed body and encoded response limits are 32 MiB maximum; concurrency is
-bounded (default 8). Conversion runs on blocking workers whose permits survive
-RPC cancellation. gRPC requests are limited to 64 KiB. Shutdown handles SIGTERM.
+The encoded protobuf response limit is 32 MiB maximum; concurrency is bounded
+(default 8). The generated client buffers and decodes JSON without a pre-decode
+HTTP body cap. gRPC requests are limited to 64 KiB. Shutdown handles SIGTERM.
 
 Missing, null, empty and -99 measurements become absent optional fields. Real
 zeroes and negative temperatures survive. Numbers may be JSON numbers or numeric
@@ -77,9 +77,12 @@ terms and attribution. This project is not affiliated with IPMA.
 
 ## Generated upstream client
 
-HTTP operations use the corresponding `ipma-openapi` generated `raw::Client`,
-with the existing configured HTTP client and decompressed body-size limit.
-After the bounded read, the blocking conversion worker deserializes JSON into
-that crate's generated response models and maps their fields directly to protobuf.
-Original JSON rows are retained separately in `source_json`, including nulls,
-unknown fields and source number spelling.
+HTTP operations call the standard Progenitor-generated `Client` from
+[`ipma-openapi`](https://github.com/Zizico2/ipma-openapi) and use its returned
+models directly. The proxy configures reqwest timeouts, TLS, gzip and redirects
+through the standard constructor. There is no custom streaming client, manual
+JSON response decoder, or transport wrapper. JSON responses are buffered and
+decoded by the generated client; size checks apply to the protobuf response.
+`source_json` serializes the generated row model, including unknown fields.
+It is not the original response bytes: optional null/missing fields and numeric
+formatting follow the generated model's Serde behavior.
