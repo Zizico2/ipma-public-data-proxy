@@ -189,7 +189,7 @@ async fn all_feeds_delegate_and_proxy_never_caches() {
 }
 #[tokio::test]
 async fn preserves_zero_negatives_missing_values_and_unknown_fields() {
-    let body = r#"[{"globalIdLocal":1110600,"dataPrev":"2026-11-12T10:00:00","idPeriodo":7,"tMed":"-2.5","hR":0,"tMax":null,"tMin":"-99.0","utci":"","ffVento":"0","idTipoTempo":777,"future":{"x":true}}]"#;
+    let body = r#"[{"globalIdLocal":1110600,"dataPrev":"2026-11-12T10:00:00","idPeriodo":7,"tMed":"-2.5","hR":0.00e0,"tMax":null,"tMin":"-99.0","utci":"","ffVento":"0","idTipoTempo":777,"future":{"x":true}}]"#;
     let mut h = harness(
         StatusCode::OK,
         Some(body),
@@ -217,6 +217,10 @@ async fn preserves_zero_negatives_missing_values_and_unknown_fields() {
     assert_eq!(f.weather_type_code, Some(777));
     let original: serde_json::Value = serde_json::from_str(&f.source_json).unwrap();
     assert_eq!(original["future"]["x"], true);
+    assert!(original["tMax"].is_null());
+    assert!(original.get("tMax").is_some());
+    assert!(original.get("tempAguaMar").is_none());
+    assert_eq!(f.source_json, &body[1..body.len() - 1]);
     assert_eq!(f.forecast_at.unwrap().seconds, 1794477600);
 }
 #[tokio::test]
@@ -234,6 +238,7 @@ async fn validates_request_before_fetch_and_rejects_schema_drift() {
     for body in [
         "{}",
         "[null]",
+        r#"[{"globalIdLocal":1110600,"dataPrev":"2026-11-12T10:00:00","tMed":true}]"#,
         r#"[{"globalIdLocal":1,"dataPrev":"2026-11-12T10:00:00"}]"#,
         r#"[{"globalIdLocal":1110600,"dataPrev":"bad"}]"#,
         r#"[{"globalIdLocal":1110600,"dataPrev":"2026-11-12T10:00:00","tMed":"NaN"}]"#,

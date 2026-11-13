@@ -78,9 +78,8 @@ terms and attribution. This project is not affiliated with IPMA.
 ## Generated upstream client
 
 HTTP operations use the corresponding `ipma-openapi` generated `raw::Client`,
-pinned to an exact Git revision in Cargo.toml and Cargo.lock. The proxy injects
-its existing TLS-verified reqwest transport, timeout and no-redirect/no-retry
-policy. Streaming responses pass through the decompressed body cap before the
-existing bounded blocking conversion into protobuf. No typed JSON decode/re-encode
-occurs, so source nulls, unknown fields, numeric spellings and Geobuf properties
-retain their existing semantics. The gateway and gRPC contract are unchanged.
+with the existing configured HTTP client and decompressed body-size limit.
+After the bounded read, the blocking conversion worker deserializes JSON into
+that crate's generated response models and maps their fields directly to protobuf.
+Original JSON rows are retained separately in `source_json`, including nulls,
+unknown fields and source number spelling.
